@@ -1,0 +1,1052 @@
+----- Start of APIService.swift -----
+//
+//  APIService.swift
+//  MentalHealthJournalApp
+//
+//  Created by Debasish Chowdhury on 2024-11-28.
+//
+
+import Foundation
+
+class APIService {
+    static let shared = APIService()
+    let baseURL = "https://game-pal-fj5v7g.uc.r.appspot.com"
+    func generatePrompts(moods: [String], previousConversation: [Message], completion: @escaping (Message?) -> Void) {
+            guard let url = URL(string: "\(baseURL)/generate_prompts") else {
+                completion(nil)
+                return
+            }
+            
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            
+            let conversation = previousConversation.map { ["role": $0.role.rawValue, "content": $0.content] }
+            
+            let body: [String: Any] = [
+                "mood": moods,
+                "previous_conversation": conversation
+            ]
+            
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+            request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                if let data = data,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let content = json["content"] as? String {
+                    let suggestedResponses = json["suggested_responses"] as? [String]
+                    let assistantMessage = Message(role: .assistant, content: content, suggestedResponses: suggestedResponses)
+                    completion(assistantMessage)
+                } else {
+                    completion(nil)
+                }
+            }.resume()
+        }
+}
+
+----- End of APIService.swift -----
+
+----- Start of AuthenticationService.swift -----
+import LocalAuthentication
+
+class AuthenticationService: ObservableObject {
+    func authenticate(completion: @escaping (Bool, Error?) -> Void) {
+        let context = LAContext()
+        var error: NSError?
+
+        // Check if biometric authentication is available
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
+            let reason = "Unlock your journal"
+
+            context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, authenticationError in
+                DispatchQueue.main.async {
+                    completion(success, authenticationError)
+                }
+            }
+        } else {
+            // Biometric authentication not available
+            DispatchQueue.main.async {
+                completion(false, error)
+            }
+        }
+    }
+}
+import SwiftUI
+
+struct AuthenticationView: View {
+    var body: some View {
+        VStack {
+            Spacer()
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle())
+            Text("Authenticating...")
+                .padding()
+            Spacer()
+        }
+    }
+}
+
+----- End of AuthenticationService.swift -----
+
+----- Start of ContentView.swift -----
+import SwiftUI
+
+struct ContentView: View {
+    @EnvironmentObject var journalViewModel: JournalViewModel
+    @AppStorage("isDarkMode") private var isDarkMode = false
+
+    var body: some View {
+        TabView {
+            HomeView()
+                .tabItem {
+                    Label("Home", systemImage: "house")
+                }
+
+            JournalEntriesView()
+                .tabItem {
+                    Label("Journal", systemImage: "book")
+                }
+
+            InsightsView()
+                .tabItem {
+                    Label("Insights", systemImage: "chart.bar")
+                }
+
+            CopingStrategiesView()
+                .tabItem {
+                    Label("Coping", systemImage: "lightbulb")
+                }
+
+            SettingsView()
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape")
+                }
+        }
+        .preferredColorScheme(isDarkMode ? .dark : .light)
+    }
+}
+
+----- End of ContentView.swift -----
+
+----- Start of CopingStrategiesView.swift -----
+import SwiftUI
+
+struct CopingStrategiesView: View {
+    @EnvironmentObject var journalViewModel: JournalViewModel
+    private let copingStrategyService = CopingStrategyService()
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(copingStrategies, id: \.self) { strategy in
+                    Text(strategy)
+                }
+            }
+            .navigationTitle("Coping Strategies")
+        }
+    }
+
+    var copingStrategies: [String] {
+        guard let recentMood = journalViewModel.entries.last?.mood else {
+            return ["No strategies available. Please add a journal entry to receive personalized strategies."]
+        }
+        return copingStrategyService.getStrategies(for: recentMood)
+    }
+}
+
+----- End of CopingStrategiesView.swift -----
+
+----- Start of CopingStrategyService.swift -----
+class CopingStrategyService {
+    func getStrategies(for mood: Mood) -> [String] {
+        switch mood {
+        case .happy:
+            return ["Keep up the good work!", "Share your happiness with others."]
+        case .sad:
+            return ["Try a relaxation exercise.", "Talk to a friend or family member."]
+        case .anxious:
+            return ["Practice deep breathing.", "Write down your worries."]
+        case .stressed:
+            return ["Take a short walk.", "Listen to calming music."]
+        case .overwhelmed:
+            return ["Take a short walk.", "Listen to calming music."]
+
+        case .excited:
+            return ["Take a short walk.", "Listen to calming music."]
+
+        }
+    }
+}
+
+----- End of CopingStrategyService.swift -----
+
+----- Start of CreateJournalView.swift -----
+import SwiftUI
+
+struct CreateJournalView: View {
+    @State private var content: String = ""
+    @State private var selectedTags: [String] = []
+    @Environment(\.presentationMode) var presentationMode
+    @EnvironmentObject var journalViewModel: JournalViewModel
+
+    var body: some View {
+        VStack {
+            TextEditor(text: $content)
+                .padding()
+                .navigationTitle("New Entry")
+                .navigationBarTitleDisplayMode(.inline)
+
+            // Optional: Tag selection UI
+
+            Button(action: saveEntry) {
+                Text("Save")
+                    .font(.headline)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.accentColor)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+            }
+            .padding()
+        }
+    }
+
+    func saveEntry() {
+        journalViewModel.addEntry(content: content, tags: selectedTags)
+        presentationMode.wrappedValue.dismiss()
+    }
+}
+
+----- End of CreateJournalView.swift -----
+
+----- Start of EntryListView.swift -----
+import SwiftUI
+struct EntryListView: View {
+    @ObservedObject var viewModel: JournalViewModel
+
+    var body: some View {
+        List(viewModel.entries) { entry in
+            HStack {
+                Text(entry.date, style: .date)
+                Spacer()
+                if let mood = entry.mood {
+                    Text(mood.rawValue.capitalized)
+                        .foregroundColor(colorForMood(mood))
+                }
+            }
+        }
+    }
+
+    func colorForMood(_ mood: Mood) -> Color {
+        switch mood {
+        case .happy:
+            return .green
+        case .sad:
+            return .blue
+        case .anxious, .stressed:
+            return .orange
+        case .overwhelmed:
+            return .orange
+        case .excited:
+            return .orange
+        }
+    }
+}
+
+----- End of EntryListView.swift -----
+
+----- Start of HomeView.swift -----
+import SwiftUI
+
+struct HomeView: View {
+    @EnvironmentObject var journalViewModel: JournalViewModel
+
+    var body: some View {
+        NavigationView {
+            VStack {
+                MoodSummaryView()
+                Spacer()
+                NavigationLink(destination: InteractiveJournalView()) {
+                    Text("New Journal Entry")
+                        .font(.headline)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                        .background(Color.accentColor)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                }
+                .padding()
+                Spacer()
+            }
+            .navigationTitle("Home")
+        }
+    }
+}
+
+----- End of HomeView.swift -----
+
+----- Start of InsightsView.swift -----
+import SwiftUI
+import Charts
+
+struct InsightsView: View {
+    @EnvironmentObject var journalViewModel: JournalViewModel
+
+    var body: some View {
+        NavigationView {
+            VStack {
+                Text("Mood Over Time")
+                    .font(.headline)
+                    .padding()
+
+                if journalViewModel.entries.isEmpty {
+                    Text("No data available. Start journaling to see insights.")
+                        .foregroundColor(.secondary)
+                        .padding()
+                } else {
+                    Chart {
+                        ForEach(journalViewModel.entries) { entry in
+                            if let mood = entry.mood {
+                                LineMark(
+                                    x: .value("Date", entry.date),
+                                    y: .value("Mood", moodScore(mood))
+                                )
+                            }
+                        }
+                    }
+                    .chartYScale(domain: -1...2)
+                    .padding()
+                }
+            }
+            .navigationTitle("Insights")
+        }
+    }
+
+    func moodScore(_ mood: Mood) -> Int {
+        switch mood {
+        case .happy:
+            return 2
+        case .stressed:
+            return 1
+        case .anxious:
+            return 0
+        case .sad:
+            return -1
+        case .overwhelmed:
+            return -1
+        case .excited:
+            return 1
+        }
+    }
+}
+
+----- End of InsightsView.swift -----
+
+----- Start of InteractiveJournalView.swift -----
+import SwiftUI
+import SwiftUI
+
+struct InteractiveJournalView: View {
+    @State private var selectedMoods: [Mood] = []
+    @State private var messages: [Message] = []
+    @State private var showMoodSelection: Bool = true
+    @State private var isLoading: Bool = false
+    @State private var userInput: String = ""
+    @EnvironmentObject var journalViewModel: JournalViewModel
+    @Environment(\.presentationMode) var presentationMode
+
+    var body: some View {
+        VStack {
+            if showMoodSelection {
+                MoodSelectionView(selectedMoods: $selectedMoods, onContinue: {
+                    if !selectedMoods.isEmpty {
+                        startConversation()
+                        withAnimation {
+                            showMoodSelection = false
+                        }
+                    }
+                })
+            } else {
+                ConversationView(messages: messages, onSelectSuggestedResponse: { selectedResponse in
+                    handleSuggestedResponse(selectedResponse)
+                })
+                if isLoading {
+                    ProgressView()
+                        .padding()
+                } else {
+                    HStack {
+                        TextField("Your response...", text: $userInput)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .onSubmit {
+                                sendMessage()
+                            }
+                        Button(action: {
+                            sendMessage()
+                        }) {
+                            Image(systemName: "paperplane.fill")
+                                .foregroundColor(.accentColor)
+                        }
+                        .disabled(userInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .padding()
+                }
+            }
+        }
+        .navigationTitle("New Journal Entry")
+        .navigationBarItems(trailing: Button("Finish") {
+            finishSession()
+        })
+        .onAppear {
+            if messages.isEmpty {
+                showMoodSelection = true
+            }
+        }
+    }
+
+    func startConversation() {
+        isLoading = true
+        
+        // Prepare an empty conversation since this is the start
+        let conversation: [Message] = []
+        
+        APIService.shared.generatePrompts(moods: selectedMoods.map { $0.rawValue }, previousConversation: conversation) { assistantMessage in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                if let assistantMessage = assistantMessage {
+                    self.messages.append(assistantMessage)
+                } else {
+                    let errorMessage = Message(role: .assistant, content: "How are you feeling today?")
+                    self.messages.append(errorMessage)
+                }
+            }
+        }
+    }
+
+    func handleSuggestedResponse(_ response: String) {
+        // Add the user's selected response to the messages
+        let userMessage = Message(role: .user, content: response)
+        messages.append(userMessage)
+
+        // Fetch assistant's response
+        fetchAssistantResponse()
+    }
+
+    func sendMessage() {
+        guard !userInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        // Add user's message
+        let userMessage = Message(role: .user, content: userInput)
+        messages.append(userMessage)
+        userInput = ""
+
+        // Fetch assistant's response
+        fetchAssistantResponse()
+    }
+    func fetchAssistantResponse() {
+        isLoading = true
+        
+        // Prepare conversation history
+        let conversation = messages
+        
+        APIService.shared.generatePrompts(moods: selectedMoods.map { $0.rawValue }, previousConversation: conversation) { assistantMessage in
+            DispatchQueue.main.async {
+                self.isLoading = false
+                if let assistantMessage = assistantMessage {
+                    self.messages.append(assistantMessage)
+                } else {
+                    let errorMessage = Message(role: .assistant, content: "I'm sorry, I couldn't generate a response at this time.")
+                    self.messages.append(errorMessage)
+                }
+            }
+        }
+    }
+
+    func finishSession() {
+        // Combine all user messages into one entry
+        let journalContent = messages
+            .filter { $0.role == .user }
+            .map { $0.content }
+            .joined(separator: "\n\n")
+
+        journalViewModel.addEntry(content: journalContent, tags: [], moods: selectedMoods)
+        presentationMode.wrappedValue.dismiss()
+    }
+}
+struct ConversationView: View {
+    var messages: [Message]
+    var onSelectSuggestedResponse: (String) -> Void // Add this line
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                ForEach(messages) { message in
+                    VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 5) {
+                        HStack {
+                            if message.role == .assistant {
+                                MessageBubble(message: message.content, isFromUser: false)
+                                Spacer()
+                            } else {
+                                Spacer()
+                                MessageBubble(message: message.content, isFromUser: true)
+                            }
+                        }
+                        .padding(.horizontal)
+
+                        // Display suggested responses if any
+                        if message.role == .assistant, let suggestions = message.suggestedResponses {
+                            SuggestedResponsesView(suggestions: suggestions, onSelect: onSelectSuggestedResponse)
+                                .padding(.horizontal)
+                        }
+                    }
+                    .id(message.id) // Add this line for scrolling
+                }
+            }
+            .onChange(of: messages.count) { _,_ in
+                // Scroll to the bottom when new message is added
+                if let lastMessage = messages.last {
+                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                }
+            }
+        }
+    }
+}
+struct SuggestedResponsesView: View {
+    var suggestions: [String]
+    var onSelect: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(suggestions, id: \.self) { suggestion in
+                Button(action: {
+                    onSelect(suggestion)
+                }) {
+                    HStack {
+                        Image(systemName: "quote.bubble")
+                            .foregroundColor(.white)
+                        Text(suggestion)
+                            .font(.body)
+                            .foregroundColor(.white)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [Color.blue.opacity(0.8), Color.purple.opacity(0.8)]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(10)
+                    .shadow(color: Color.black.opacity(0.2), radius: 5, x: 0, y: 2)
+                }
+                .buttonStyle(PressableButtonStyle())
+                .buttonStyle(PressableButtonStyle())
+            }
+        }
+        .padding(.vertical)
+    }
+}
+
+struct MessageBubble: View {
+    var message: String
+    var isFromUser: Bool
+
+    var body: some View {
+        Text(message)
+            .padding()
+            .foregroundColor(isFromUser ? .white : .black)
+            .background(isFromUser ? Color.accentColor : Color.gray.opacity(0.2))
+            .cornerRadius(10)
+            .frame(maxWidth: 250, alignment: isFromUser ? .leading : .trailing)
+            .padding(isFromUser ? .leading : .trailing, 50)
+            .padding(.vertical, 5)
+    }
+}
+
+struct Message: Identifiable {
+    var id = UUID()
+    var role: Role
+    var content: String
+    var suggestedResponses: [String]? // Add this line
+
+    enum Role: String {
+            case user = "user"
+            case assistant = "assistant"
+        }
+}
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .brightness(configuration.isPressed ? -0.05 : 0)
+    }
+}
+
+----- End of InteractiveJournalView.swift -----
+
+----- Start of JournalEntriesView.swift -----
+import SwiftUI
+
+struct JournalEntriesView: View {
+    @EnvironmentObject var journalViewModel: JournalViewModel
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(journalViewModel.entries.sorted(by: { $0.date > $1.date })) { entry in
+                    NavigationLink(destination: JournalEntryDetailView(entry: entry)) {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(entry.date, style: .date)
+                                    .font(.headline)
+                                Text(entry.content)
+                                    .lineLimit(1)
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            if let mood = entry.mood {
+                                Text(mood.rawValue.capitalized)
+                                    .foregroundColor(colorForMood(mood))
+                            }
+                        }
+                    }
+                }
+                .onDelete(perform: deleteEntry)
+            }
+            .navigationTitle("Journal Entries")
+            .toolbar {
+                EditButton()
+            }
+        }
+    }
+
+    func deleteEntry(at offsets: IndexSet) {
+        journalViewModel.entries.remove(atOffsets: offsets)
+    }
+
+    func colorForMood(_ mood: Mood) -> Color {
+        switch mood {
+        case .happy:
+            return .green
+        case .sad:
+            return .blue
+        case .anxious, .stressed:
+            return .orange
+        case .overwhelmed:
+            return .orange
+        case .excited:
+            return .orange
+
+        }
+    }
+}
+struct JournalEntriesView_Previews: PreviewProvider {
+    static var previews: some View {
+        JournalEntriesView()
+            .environmentObject(JournalViewModel())
+    }
+}
+
+----- End of JournalEntriesView.swift -----
+
+----- Start of JournalEntry.swift -----
+import Foundation
+
+struct JournalEntry: Identifiable, Codable {
+    var id: UUID
+    var date: Date
+    var content: String
+    var tags: [String]
+    var mood: Mood?
+}
+
+----- End of JournalEntry.swift -----
+
+----- Start of JournalEntryDetailView.swift -----
+import SwiftUI
+
+struct JournalEntryDetailView: View {
+    let entry: JournalEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(entry.date, style: .date)
+                .font(.headline)
+
+            if let mood = entry.mood {
+                Text("Mood: \(mood.rawValue.capitalized)")
+                    .foregroundColor(colorForMood(mood))
+            }
+
+            ScrollView {
+                Text(entry.content)
+                    .padding(.top)
+            }
+
+            Spacer()
+        }
+        .padding()
+        .navigationTitle("Entry Details")
+    }
+
+    func colorForMood(_ mood: Mood) -> Color {
+        switch mood {
+        case .happy:
+            return .green
+        case .sad:
+            return .blue
+        case .anxious, .stressed:
+            return .orange
+        case .overwhelmed:
+            return .orange
+
+        case .excited:
+            return .orange
+
+        }
+    }
+}
+
+----- End of JournalEntryDetailView.swift -----
+
+----- Start of JournalViewModel.swift -----
+import Foundation
+
+class JournalViewModel: ObservableObject {
+    @Published var entries: [JournalEntry] = [] {
+            didSet {
+                saveEntries()
+            }
+        }
+
+        init() {
+            loadEntries()
+        } 
+    
+    func addEntry(content: String, tags: [String], moods: [Mood]? = nil) {
+        let newEntry = JournalEntry(
+            id: UUID(),
+            date: Date(),
+            content: content,
+            tags: tags,
+            mood: nil // Mood will be set after analysis
+        )
+        entries.append(newEntry)
+        // Trigger mood analysis
+        analyzeMood(for: newEntry)
+    }
+    func saveEntries() {
+            if let encodedData = try? JSONEncoder().encode(entries) {
+                UserDefaults.standard.set(encodedData, forKey: "journalEntries")
+            }
+        }
+
+        func loadEntries() {
+            if let savedData = UserDefaults.standard.data(forKey: "journalEntries"),
+               let decodedEntries = try? JSONDecoder().decode([JournalEntry].self, from: savedData) {
+                entries = decodedEntries
+            }
+        }
+}
+
+import NaturalLanguage
+
+extension JournalViewModel {
+    func analyzeMood(for entry: JournalEntry) {
+        let sentimentScore = performSentimentAnalysis(on: entry.content)
+        // Map sentimentScore to Mood
+        var mood: Mood?
+        switch sentimentScore {
+        case let x where x > 0.5:
+            mood = .happy
+        case let x where x < -0.5:
+            mood = .sad
+        default:
+            mood = .stressed
+        }
+        // Update the entry with mood
+        if let index = entries.firstIndex(where: { $0.id == entry.id }) {
+            entries[index].mood = mood
+        }
+    }
+
+    func performSentimentAnalysis(on text: String) -> Double {
+        let tagger = NLTagger(tagSchemes: [.sentimentScore])
+        tagger.string = text
+        let sentiment = tagger.tag(at: text.startIndex, unit: .paragraph, scheme: .sentimentScore).0
+        let score = Double(sentiment?.rawValue ?? "0") ?? 0.0
+        return score
+    }
+}
+
+----- End of JournalViewModel.swift -----
+
+----- Start of MentalHealthJournalAppApp.swift -----
+import SwiftUI
+
+@main
+struct MentalHealthJournalApp: App {
+    @StateObject private var journalViewModel = JournalViewModel()
+    @StateObject private var authService = AuthenticationService()
+    @AppStorage("isDarkMode") private var isDarkMode = false
+    @State private var isAuthenticated = true
+    @State private var authError: Error?
+
+    var body: some Scene {
+        WindowGroup {
+            if isAuthenticated {
+                ContentView()
+                    .environmentObject(journalViewModel)
+                    .preferredColorScheme(isDarkMode ? .dark : .light)
+            } else {
+                AuthenticationView()
+                    .onAppear {
+                        authenticateUser()
+                    }
+                    .alert(isPresented: Binding<Bool>(
+                        get: { authError != nil },
+                        set: { _ in authError = nil }
+                    )) {
+                        Alert(
+                            title: Text("Authentication Failed"),
+                            message: Text(authError?.localizedDescription ?? "Please try again."),
+                            dismissButton: .default(Text("Retry")) {
+                                authenticateUser()
+                            }
+                        )
+                    }
+            }
+        }
+    }
+
+    private func authenticateUser() {
+        authService.authenticate { success, error in
+            if success {
+                isAuthenticated = true
+            } else {
+                authError = error
+            }
+        }
+    }
+}
+
+----- End of MentalHealthJournalAppApp.swift -----
+
+----- Start of MoodSelectionView.swift -----
+import SwiftUI
+
+struct MoodSelectionView: View {
+    @Binding var selectedMoods: [Mood]
+    var onContinue: () -> Void
+
+    @State private var moods: [Mood] = [.happy, .sad, .anxious, .stressed, .overwhelmed, .excited]
+    @Environment(\.presentationMode) var presentationMode
+
+    var body: some View {
+        VStack {
+            Text("How are you feeling today?")
+                .font(.title2)
+                .padding()
+
+            // Mood icons grid
+            ScrollView {
+                LazyVGrid(columns: [GridItem(), GridItem(), GridItem()], spacing: 20) {
+                    ForEach(moods, id: \.self) { mood in
+                        Button(action: {
+                            toggleMoodSelection(mood)
+                        }) {
+                            VStack {
+                                Image(systemName: iconName(for: mood))
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(width: 50, height: 50)
+                                    .foregroundColor(selectedMoods.contains(mood) ? .blue : .gray)
+                                Text(mood.rawValue.capitalized)
+                                    .foregroundColor(.primary)
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+
+            Spacer()
+
+            Button(action: {
+                onContinue()
+            }) {
+                Text("Continue")
+                    .font(.headline)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(selectedMoods.isEmpty ? Color.gray : Color.accentColor)
+                    .foregroundColor(.white)
+                    .cornerRadius(10)
+            }
+            .padding()
+            .disabled(selectedMoods.isEmpty)
+        }
+        .navigationTitle("Select Mood")
+    }
+
+    func toggleMoodSelection(_ mood: Mood) {
+        if selectedMoods.contains(mood) {
+            selectedMoods.removeAll { $0 == mood }
+        } else {
+            selectedMoods.append(mood)
+        }
+    }
+
+    func iconName(for mood: Mood) -> String {
+        switch mood {
+        case .happy:
+            return "smiley"
+        case .sad:
+            return "frown"
+        case .anxious:
+            return "exclamationmark.triangle"
+        case .stressed:
+            return "flame"
+        case .overwhelmed:
+            return "waveform.path.ecg"
+        case .excited:
+            return "star"
+        }
+    }
+}
+
+enum Mood: String, Codable, CaseIterable, Hashable {
+    case happy
+    case sad
+    case anxious
+    case stressed
+    case overwhelmed
+    case excited
+}
+
+----- End of MoodSelectionView.swift -----
+
+----- Start of MoodSummaryView.swift -----
+import SwiftUI
+
+struct MoodSummaryView: View {
+    @EnvironmentObject var journalViewModel: JournalViewModel
+
+    var body: some View {
+        VStack {
+            Text("Your Recent Mood")
+                .font(.title2)
+                .padding(.bottom, 5)
+
+            if let recentMood = journalViewModel.entries.last?.mood {
+                Text(recentMood.rawValue.capitalized)
+                    .font(.largeTitle)
+                    .foregroundColor(colorForMood(recentMood))
+            } else {
+                Text("No entries yet")
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding()
+    }
+
+    func colorForMood(_ mood: Mood) -> Color {
+        switch mood {
+        case .happy:
+            return .green
+        case .sad:
+            return .blue
+        case .anxious, .stressed:
+            return .orange
+        case .overwhelmed:
+            return .orange
+
+        case .excited:
+            return .orange
+
+        }
+    }
+}
+
+----- End of MoodSummaryView.swift -----
+
+----- Start of NotificationManager.swift -----
+import UserNotifications
+
+class NotificationManager {
+    static let shared = NotificationManager()
+
+    func requestPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+            // Handle permission granted or error
+        }
+    }
+    func scheduleDailyReminder(at hour: Int, minute: Int) {
+        let content = UNMutableNotificationContent()
+        content.title = "Time to Journal"
+        content.body = "Reflect on your day by adding a new journal entry."
+
+        var dateComponents = DateComponents()
+        dateComponents.hour = hour
+        dateComponents.minute = minute
+
+        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+        let request = UNNotificationRequest(identifier: "dailyJournalReminder", content: content, trigger: trigger)
+
+        UNUserNotificationCenter.current().add(request) { error in
+            // Handle error
+        }
+    }
+}
+
+----- End of NotificationManager.swift -----
+
+----- Start of SettingsView.swift -----
+import SwiftUI
+
+struct SettingsView: View {
+    @AppStorage("isDarkMode") private var isDarkMode = false
+    @State private var notificationsEnabled = false
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Appearance")) {
+                    Toggle("Dark Mode", isOn: $isDarkMode)
+                }
+
+                Section(header: Text("Notifications")) {
+                    Toggle("Enable Reminders", isOn: $notificationsEnabled)
+                        .onChange(of: notificationsEnabled) { value, newValue in
+                            if newValue {
+                                NotificationManager.shared.requestPermission()
+                                // Schedule notifications
+                            } else {
+                                UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+                            }
+                        }
+                }
+
+                Section(header: Text("Privacy")) {
+                    Button(action: {
+                        // Implement data export
+                    }) {
+                        Text("Export My Data")
+                    }
+
+                    Button(action: {
+                        // Implement data deletion
+                    }) {
+                        Text("Delete My Data")
+                            .foregroundColor(.red)
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+        }
+    }
+}
+
+----- End of SettingsView.swift -----
+
